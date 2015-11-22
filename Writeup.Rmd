@@ -1,0 +1,194 @@
+---
+title: "Course Project: Writeup"
+author: "Qian Fu"
+date: "21 November 2015"
+output: html_document
+---
+
+
+1. Introduction
+---------------
+This report is produced for the prediction assignment (Writeup) of the Coursera course - **Practical Machine Learning**. Some background information on this course project is available on the web page of the instruction for the assignment, which has been copied as follows. 
+
+*Using devices such as **Jawbone Up**, **Nike FuelBand**, and **Fitbit**, it is now possible to collect a large amount of data about personal activity relatively inexpensively. These types of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.* 
+
+Read more: http://groupware.les.inf.puc-rio.br/har#ixzz3sEEYr5Bc (see the section on the [**Weight Lifting Exercise Dataset** (WLE)](http://groupware.les.inf.puc-rio.br/static/WLE/WearableComputing_weight_lifting_exercises_biceps_curl_variations.csv)). 
+
+**(1) Data**
+
+For this course project, [training data](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) and [test data](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv) come from the WLE data source as mentioned above (see also [Velloso, E. et al., 2013](http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201)) . The data was collected from accelerometers on the *belt*, *forearm*, *arm*, and *dumbbell* of six participants, who were asked to perform barbell lifts correctly and incorrectly in five different ways. 
+
+The five classes are represented by `classe` variable, which therefore include five "levels" in the data sets:
+
+- Class `A`: exactly according to the specification;
+- Class `B`: throwing the elbows to the front;
+- Class `C`: lifting the dumbbell only halfway;
+- Class `D`: lowering the dumbbell only halfway; and
+- Class `E`: throwing the hips to the front.
+
+**(2) Objectives**
+The main aim of this project is to predict the manner in which the participants did the exercise (so that `classe` will be considered as the outcome variable). In this report, we describe: 
+
+- how we built out model and used cross validation (See Lecture 1-08); 
+- what we think the expected out of sample error (See Lecture 1-04) is; and 
+- why we made the choices we did. 
+
+We also use our prediction model to predict 20 different test cases.
+
+
+2. Data cleaning
+----------------
+
+Firstly, we downloaded both of the training and testing data sets. 
+
+```{r downloadData}
+# Download the training data for this project
+download.file(url = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", 
+              destfile = "pml-training.csv")
+# Download the test data for this project
+download.file(url = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", 
+              destfile = "pml-testing.csv")
+```
+
+Then, we read the training data sets into `trainData` in R:
+
+```{r readData}
+# Load the training data set
+trainData <- read.csv(file = "pml-training.csv")
+
+```
+
+Each observation in the data set includes *x*, *y*, and *z* values, as well as euler angles (of *roll*, *pitch* and *yaw*). For each time window, there is also a set of statistics, including mean, variance, maximum, minimum, etc. (For more information: https://archive.ics.uci.edu/ml/datasets/Weight+Lifting+Exercises+monitored+with+Inertial+Measurement+Units). It was noted that most of those statistics are null (or empty) values in the given data sets. In this assignment, we considered only those *x*, *y*, *z*, *roll*, *pitch* and *yaw* variables as predictors to build a mmodel, with which the `classe` variable was treated as the outcome. 
+
+Therefore, the training data set is cleaned in a way as follows:
+
+```{r subsetData}
+pattern = "_x$|_y$|_z$|classe|roll|pitch|yaw"
+training <- trainData[, grep(pattern, colnames(trainData))]
+
+training <- training[, colSums(is.na(training)) == 0]
+training <- training[, colSums(training != "") == nrow(training)]
+
+```
+
+In that way, there were then `r dim(training)[2]` valid variables remaining with `r dim(training)[1]` observations. 
+
+2. Model fitting
+----------------
+For the purpose of reproducing the analysis, we set the seed number to be `123`. Note that any of other integer number is also applicable. In addition, the required R packages include `lattice`, `ggplot2`, `caret` and `randomForest`.
+
+```{r setSeedAndLoadLibraries, message=FALSE}
+set.seed(123)
+
+library(lattice)
+library(ggplot2)
+library(caret)
+library(rpart)
+library(randomForest)
+```
+
+For **cross validation**, we may split the the training data set into many (say 20) sub-datasets for training and testing. The sub-datasets are stored into `trainingSet` and `testingSet` variables, respectively, and they were then used to fit . 
+
+```{r}
+folds <- createFolds(y = training$classe, k = 20, list = TRUE, returnTrain = TRUE)
+
+# Lists of training and testing sub-datasets for cross validation
+trainingSet <- list()
+testingSet <- list()
+for (i in 1:20) {
+    trainingSet[[i]] <- training[folds[[i]], ]
+    testingSet[[i]] <- training[-folds[[i]], ]
+}
+```
+
+**For demonstration purposes, we only examined one pair of training and testing sub-datasets in this report.** Here we firstly fit the data through "classification trees", using `train()` in `caret` package.
+
+```{r fitRpartModel, message=FALSE}
+# Data
+training1 <- trainingSet[[1]]
+testing1 <- trainingSet[[1]]
+
+modFit_rpart <- train(classe ~ ., data = training1, method = "rpart")
+
+# Predict "classes" with the "testing1" data set
+pred_rpart <- predict(modFit_rpart, newdata = testing1)
+
+# Check the confusion matrix and statistics
+confusionMatrix(pred_rpart, testing1$classe)
+```
+
+As can be seen from above, the accuracy of the method in the test set turned out to be around `r round(confusionMatrix(pred_rpart, testing1$classe)$overall[1], 2)`.
+
+We could also define a function (see *Question 4* in **Quiz 3**) to check the out-of-sample error rate:
+
+```{r oosErrorRateFunc}
+missClass = function(values, prediction) {
+    sum(sum(prediction != values)) / length(values)
+}
+
+missClass(testing1$classe, pred_rpart)
+```
+
+So the out-of-sample error rate was expected to be about `r round(missClass(testing1$classe, pred_rpart), 2)`. There should be much room for imporvement.
+
+Then we tried to fit the data through "random forests" method, in which case the `randomForest()` function was used instead of `train()`. (It must be pointed out here that `train(... method = "rf")` was tried, which had, however, never terminated "training".)
+
+```{r fitRfModel, message=FALSE}
+# Data
+training1 <- trainingSet[[1]]
+testing1 <- trainingSet[[1]]
+
+modFit_rf <- randomForest(classe ~ ., data = training1)
+
+# Predict "classes" with the "testing1" data set
+pred_rf <- predict(modFit_rf, newdata = testing1)
+
+# Check the confusion matrix and the out-of-sample error rate
+confusionMatrix(pred_rf, testing1$classe)
+errorRate <- missClass(testing1$classe, pred_rf)
+```
+
+In this case, the accuracy of the method in the test set turned out to be perfect; and the out-of-sample error rate was expected to be `r round(errorRate, 2)`. This could be considered zero in practice. Therefore, we used the final model (represented by `modFit_rf`) to predict the "classes" with the given testing data set. 
+
+The final testing data set was read into variable, `testData`, in R; and we clean it in the way as we did for the original training data set:
+
+```{r cleanTestingData}
+testData <- read.csv(file = "pml-testing.csv")
+testing <- testData[, grep(pattern, colnames(testData))]
+```
+
+```{r predictTestingData}
+# Predict "classes" with the given "testing" data set
+pred <- predict(modFit_rf, newdata = testing)
+```
+
+The predicted outcome for the testing data set was presented below:
+
+```{r, echo=FALSE}
+pred
+```
+
+
+Submission
+----------
+Finally, with the following defined function, the results for submission were saved locally into separate files. 
+
+```{r}
+pml_write_files = function(x) {
+  n = length(x)
+  for(i in 1:n) {
+    filename = paste0("problem_id_", i, ".txt")
+    write.table(x[i],file=filename, quote = FALSE, row.names = FALSE, col.names = FALSE)
+  }
+}
+pml_write_files(pred)
+```
+
+
+
+&nbsp;
+
+Reference
+---------
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+[[Full paper](http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf)]
